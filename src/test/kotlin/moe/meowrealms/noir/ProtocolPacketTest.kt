@@ -156,6 +156,16 @@ class ProtocolPacketTest {
         assertFalse(NoirConstants.ClientRequirements.isAcceptedClient("  "))
     }
 
+    /**
+     * 本次发布配套的客户端是 2.6.5.23（修复了进入他人视野时 requestModelSwitch 的空指针崩溃）。
+     * 2.6.5.22 仍带着那个崩溃，必须被服务端挡在握手之外，否则玩家会继续崩客户端。
+     */
+    @Test
+    fun `client brand is pinned to the crash-fixed build`() {
+        assertEquals("openysm:2.6.5.23", NoirConstants.ClientRequirements.REQUIRED_CLIENT_BRAND)
+        assertFalse(NoirConstants.ClientRequirements.isAcceptedClient("openysm:2.6.5.22"))
+    }
+
     @Test
     fun `molang feedback rejects excessive variable count`() {
         val buffer = SimpleFriendlyByteBuf(Unpooled.buffer())

@@ -22,7 +22,7 @@ object NoirConstants {
      */
     object ClientRequirements {
         /** 当前随服务端一起发布的客户端构建标识，必须与客户端 NetworkHandler.CLIENT_BRAND 完全一致。 */
-        const val REQUIRED_CLIENT_BRAND = "openysm:2.6.5.22"
+        const val REQUIRED_CLIENT_BRAND = "openysm:2.6.5.23"
 
         /** 只有完全匹配的客户端标识才允许完成握手。 */
         fun isAcceptedClient(brand: String?): Boolean {
