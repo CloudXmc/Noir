@@ -7,6 +7,7 @@ import moe.meowrealms.noir.network.packet.c2s.C2SModelDataPayload
 import moe.meowrealms.noir.network.packet.c2s.C2SModelSwitchRequestPacket
 import moe.meowrealms.noir.network.packet.c2s.C2SMolangExecuteRequestPacket
 import moe.meowrealms.noir.network.packet.c2s.C2SMolangExpressionValueSyncPacket
+import moe.meowrealms.noir.network.packet.c2s.C2SMolangFeedbackPacket
 import moe.meowrealms.noir.network.packet.c2s.C2SStarModelPacket
 
 interface PacketHandler {
@@ -29,4 +30,6 @@ interface PacketHandler {
     fun handleMolangExecuteRequest(packet: C2SMolangExecuteRequestPacket)
 
     fun handleMolangExpressionValueSyncPacket(packet: C2SMolangExpressionValueSyncPacket)
+
+    fun handleMolangFeedback(packet: C2SMolangFeedbackPacket)
 }

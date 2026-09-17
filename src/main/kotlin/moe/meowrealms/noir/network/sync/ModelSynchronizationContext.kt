@@ -7,7 +7,7 @@ import io.netty.util.ReferenceCountUtil
 import moe.meowrealms.noir.NoirConstants
 import moe.meowrealms.noir.NoirMain
 import moe.meowrealms.noir.model.ModelManager
-import moe.meowrealms.noir.network.ClientConnectionManager.getYsmConnection
+import moe.meowrealms.noir.network.ClientConnectionManager.getYsmConnectionOrNull
 import moe.meowrealms.noir.network.packet.s2c.S2CModelDataPayloadPacket
 import org.bukkit.entity.Player
 import rip.ysm.security.YSMByteBuf
@@ -20,6 +20,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.util.*
 import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.Volatile
 import kotlin.concurrent.withLock
 import kotlin.math.max
@@ -44,6 +45,9 @@ class ModelSynchronizationContext(
 
     private val scheduledTasksLock = ReentrantLock()
     private val scheduledTasks: MutableList<ScheduledTask> = ArrayList()
+    // 任务取消后不保证分块回调继续执行，因此不能只靠正常传输完成路径关闭文件。
+    private val activeTransfers: MutableSet<ModelCacheTransfer> =
+        Collections.newSetFromMap(ConcurrentHashMap())
     private val rateLimiter = ModelSyncRateLimiter(NoirConstants.ModelSyncConstants.PER_PLAYER_RATE_LIMIT_MBPS)
 
     // reusable ByteBuf for chunk payload building, allocated once in sendMissing()
@@ -95,13 +99,17 @@ class ModelSynchronizationContext(
             val result = YsmCrypt.encrypt(outBuf.toArray(), YsmCrypt.publicKey, true)
             this.subKeyInBytes = result.nextKey
 
-            player.getYsmConnection().send(S2CModelDataPayloadPacket(result.data))
+            player.getYsmConnectionOrNull()?.send(S2CModelDataPayloadPacket(result.data))
         }
     }
 
     fun cleanup() {
         this.state = 0
         this.cancelScheduledTasks()
+
+        val transfers = this.activeTransfers.toList()
+        this.activeTransfers.clear()
+        transfers.forEach { closeTransferChannel(it) }
 
         this.releaseReusableChunkBuf()
 
@@ -166,10 +174,14 @@ class ModelSynchronizationContext(
             }
 
             val channel = Files.newByteChannel(file, StandardOpenOption.READ)
-
-            this.scheduleNextModelChunk(
-                ModelCacheTransfer(file, requested.hash1, requested.hash2, totalSize.toInt(), queue, channel)
+            val transfer = ModelCacheTransfer(
+                file, requested.hash1, requested.hash2, totalSize.toInt(), queue, channel
             )
+            if (!this.registerTransfer(transfer)) {
+                this.closeTransferChannel(transfer)
+                return
+            }
+            this.scheduleNextModelChunk(transfer)
         } catch (e: Exception) {
             NoirMain.instance.slF4JLogger.error("Failed to prepare model cache file: $file", e)
             this.scheduleNextRequestedModel(queue)
@@ -178,14 +190,20 @@ class ModelSynchronizationContext(
 
     private fun scheduleNextModelChunk(transfer: ModelCacheTransfer) {
         if (this.state < 3) {
+            this.closeTransferChannel(transfer)
             return
         }
 
-        this.trackScheduledTask(
+        val task = try {
             NoirMain.instance.morePaperLib.scheduling().asyncScheduler().run(Runnable {
                 this.processNextModelChunk(transfer)
             })
-        )
+        } catch (throwable: Throwable) {
+            this.closeTransferChannel(transfer)
+            NoirMain.instance.slF4JLogger.warn("Unable to schedule model chunk transfer for ${this.player.name}", throwable)
+            return
+        }
+        if (task == null) this.closeTransferChannel(transfer) else this.trackScheduledTask(task)
     }
 
     private fun processNextModelChunk(transfer: ModelCacheTransfer) {
@@ -230,10 +248,18 @@ class ModelSynchronizationContext(
     }
 
     private fun closeTransferChannel(transfer: ModelCacheTransfer) {
+        this.activeTransfers.remove(transfer)
         try {
             transfer.channel.close()
         } catch (_: Exception) {
         }
+    }
+
+    private fun registerTransfer(transfer: ModelCacheTransfer): Boolean {
+        if (this.state < 3) return false
+        this.activeTransfers.add(transfer)
+        if (this.state < 3 && this.activeTransfers.remove(transfer)) return false
+        return true
     }
 
     private fun readModelChunk(transfer: ModelCacheTransfer): Int {
@@ -397,11 +423,17 @@ class ModelSynchronizationContext(
     }
 
     private fun trackScheduledTask(task: ScheduledTask?) {
+        if (task == null) return
+
+        var cancelImmediately = false
         this.scheduledTasksLock.withLock {
-            task?.let {
-                this.scheduledTasks.add(it)
+            if (this.state == 0) {
+                cancelImmediately = true
+            } else {
+                this.scheduledTasks.add(task)
             }
         }
+        if (cancelImmediately) task.cancel()
     }
 
     private fun sendModelPayloadIfAlive(payload: ByteArray, minimumState: Int): Boolean {
@@ -409,12 +441,14 @@ class ModelSynchronizationContext(
             return false
         }
 
-        this.player.getYsmConnection().send(S2CModelDataPayloadPacket(payload))
+        val connection = this.player.getYsmConnectionOrNull() ?: return false
+        connection.send(S2CModelDataPayloadPacket(payload))
         return true
     }
 
     fun handleClientReply(data: ByteArray) {
         if (data.isEmpty()){
+            this.player.getYsmConnectionOrNull()?.announceSynchronizationSuccess()
             this.cleanup()
             return
         }
@@ -468,6 +502,7 @@ class ModelSynchronizationContext(
                 return
             }
         } catch (e: Exception) {
+            this.player.getYsmConnectionOrNull()?.announceSynchronizationFailure()
             NoirMain.instance.slF4JLogger.error("Model synchronization fatal error: ${this.player.name}", e)
 
             // we'll handle it upstream

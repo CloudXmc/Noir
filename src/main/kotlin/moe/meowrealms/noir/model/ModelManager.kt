@@ -43,6 +43,7 @@ object ModelManager {
     private lateinit var builtinModelsFolderPath: Path
     private lateinit var customModelsFolderPath: Path
     private lateinit var authModelsFolderPath: Path
+    private lateinit var builtinAssetsMarkerPath: Path
 
     var cacheDeterminer: Long = 0
     private lateinit var cacheKey: ByteArray
@@ -162,6 +163,8 @@ object ModelManager {
         return this.name2ModelData[modelId]
     }
 
+    fun getModelHashId(modelId: String): Int? = this.name2ModelData[modelId]?.loadedModelData?.hashId
+
     fun getModelIds(): Set<String> {
         return this.name2ModelData.keys
     }
@@ -210,10 +213,12 @@ object ModelManager {
 
         this.cacheFolderPath = this.workingDir.resolve("caches")
         this.modelsDir = this.workingDir.resolve("models")
+        val modelsDirectoryExisted = Files.isDirectory(this.modelsDir)
 
         this.builtinModelsFolderPath = this.modelsDir.resolve("builtin")
         this.customModelsFolderPath = this.modelsDir.resolve("custom")
         this.authModelsFolderPath =  this.modelsDir.resolve("auth")
+        this.builtinAssetsMarkerPath = this.modelsDir.resolve(".builtin-assets-installed")
 
         this.keyFilePath = this.workingDir.resolve("password.bin")
         this.cacheDeterminerFilePath = this.workingDir.resolve("cache_key.bin")
@@ -230,7 +235,15 @@ object ModelManager {
         if (!Files.exists(this.builtinModelsFolderPath))
             Files.createDirectories(this.builtinModelsFolderPath)
 
-        this.extractBuiltinAssets()
+        // 旧版本没有标记文件时，只要模型目录已经存在就视为已初始化，避免更新插件再次释放 misc 等内置模型。
+        if (Files.notExists(this.builtinAssetsMarkerPath)) {
+            if (!modelsDirectoryExisted) {
+                this.extractBuiltinAssets()
+            } else {
+                NoirMain.instance.slF4JLogger.info("Existing models directory detected; skip builtin model extraction.")
+            }
+            Files.writeString(this.builtinAssetsMarkerPath, "1\n")
+        }
 
         this.loadKeyFile()
         this.loadCacheDeterminer()
@@ -258,37 +271,48 @@ object ModelManager {
                 .toURI()
             val jarFsUri = URI.create("jar:${jarUri}")
 
+            var ownsFileSystem = false
             val fs: FileSystem = try {
                 FileSystems.getFileSystem(jarFsUri)
             } catch (_: FileSystemNotFoundException) {
+                ownsFileSystem = true
                 FileSystems.newFileSystem(jarFsUri, emptyMap<String, Any>())
             }
 
-            val builtinRoot = fs.getPath("builtin_models")
-            if (Files.notExists(builtinRoot) || !Files.isDirectory(builtinRoot)) {
-                return
+            try {
+                val builtinRoot = fs.getPath("builtin_models")
+                if (Files.notExists(builtinRoot) || !Files.isDirectory(builtinRoot)) {
+                    return
+                }
+
+                Files.walkFileTree(builtinRoot, object : SimpleFileVisitor<Path>() {
+                    override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        val relative = builtinRoot.relativize(dir).toString()
+                        val dest = builtinModelsFolderPath.resolve(relative)
+
+                        Files.createDirectories(dest)
+
+                        return FileVisitResult.CONTINUE
+                    }
+
+                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        val relative = builtinRoot.relativize(file).toString()
+                        val dest = builtinModelsFolderPath.resolve(relative)
+
+                        Files.createDirectories(dest.parent)
+                        // 首次释放也不覆盖已存在的服主文件，避免升级或迁移时丢失自定义模型。
+                        if (Files.notExists(dest)) {
+                            Files.copy(file, dest)
+                        }
+
+                        return FileVisitResult.CONTINUE
+                    }
+                })
+            } finally {
+                if (ownsFileSystem) {
+                    fs.close()
+                }
             }
-
-            Files.walkFileTree(builtinRoot, object : SimpleFileVisitor<Path>() {
-                override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    val relative = builtinRoot.relativize(dir).toString()
-                    val dest = builtinModelsFolderPath.resolve(relative)
-
-                    Files.createDirectories(dest)
-
-                    return FileVisitResult.CONTINUE
-                }
-
-                override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                    val relative = builtinRoot.relativize(file).toString()
-                    val dest = builtinModelsFolderPath.resolve(relative)
-
-                    Files.createDirectories(dest.parent)
-                    Files.copy(file, dest, StandardCopyOption.REPLACE_EXISTING)
-
-                    return FileVisitResult.CONTINUE
-                }
-            })
         } catch (e: Exception) {
             NoirMain.instance.slF4JLogger.error("Failed to extract builtin assets from JAR!", e)
 

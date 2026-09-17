@@ -1,0 +1,39 @@
+name: Noir
+version: '${version}'
+main: moe.meowrealms.noir.NoirMain
+api-version: '1.21'
+authors: [ xWtree, MrHua269, Klop233 ]
+website: https://github.com/CloudXmc
+description: Folia/Paper YSM 服务端桥接插件
+folia-supported: true
+
+# MySQL 8 玩家模型共享存储所需的运行库，由 Paper/Folia 启动时下载。
+libraries:
+  - com.zaxxer:HikariCP:6.3.0
+  - com.mysql:mysql-connector-j:9.4.0
+
+commands:
+  noir:
+    description: YSM 桥接插件主指令
+    usage: /noir help
+    aliases: [ysm]
+
+permissions:
+  noir.command:
+    description: 使用 Noir/YSM 桥接主指令
+    default: op
+  noir.command.reload:
+    description: 重载 Noir YSM 模型
+    default: op
+  noir.command.setmodel:
+    description: 设置玩家的 YSM 模型
+    default: op
+  noir.command.players:
+    description: 查询正在使用 YSM 客户端模组的在线玩家
+    default: op
+  noir.command.broadcast:
+    description: 永久开关玩家自己接收全服 YSM 公屏消息
+    default: true
+  noir.command.kickysm:
+    description: 踢出 YSM 玩家以刷新模型状态
+    default: op

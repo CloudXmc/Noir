@@ -1,13 +1,63 @@
-# Model synchronization rate limiting
+# YSM 模型同步限速配置。
+# 修改后需要执行 /noir reload；只影响后续同步，不会删除已缓存模型。
 model-sync:
-  # Per-player bandwidth limit in Mbps (0 = unlimited)
+  # 单个玩家的模型同步带宽上限，单位 Mbps。
+  # 可选值：大于等于 0 的数字；0 表示不限速。默认值：8.0。
   per-player-rate-limit-mbps: 8.0
-  # Global total bandwidth limit in Mbps across all players (0 = unlimited)
+  # 所有玩家合计的模型同步带宽上限，单位 Mbps。
+  # 可选值：大于等于 0 的数字；0 表示不限速。默认值：40.0。
   global-rate-limit-mbps: 40.0
 
-# Default model/texture for auto-correction when a player's selection is invalid
+# 玩家选择的模型或材质无效时使用的默认值。
+# 模型资源由插件启动时从 models 目录加载；修改后需要 /noir reload。
 model-defaults:
-  # Model ID to fall back to (must be a loaded model)
+  # 回退模型 ID，必须存在于已加载模型中。默认值：default。
   model-id: "default"
-  # Texture name to fall back to (must exist on the model)
+  # 回退材质名称，必须存在于上面的模型中。默认值：default。
   texture: "default"
+
+# YSM 客户端状态全服公屏。
+# 语言文件或下面的开关修改后执行 /noir reload 生效。
+# 只影响之后产生的提示，不影响模型数据。
+announcements:
+  # 是否启用“未安装、正在同步、同步成功”等全服广播。默认值：true。
+  # 玩家可执行 /noir broadcast 永久关闭或开启自己接收，不影响其他玩家。
+  enabled: true
+
+# 跨服玩家身份识别方式。
+identity:
+  # OFFLINE_NAME：离线服/Velocity 离线模式按玩家名称识别；ONLINE_UUID：正版模式按真实 UUID 识别。
+  # 默认值：OFFLINE_NAME。修改后执行 /noir reload，旧玩家数据不会自动迁移。
+  mode: "OFFLINE_NAME"
+  # OFFLINE_NAME 模式下是否忽略名称大小写。默认值：true。
+  offline-name-ignore-case: true
+  # 是否在数据库保存玩家最后一次使用的名称。默认值：true。
+  save-last-known-name: true
+
+# 跨子服玩家模型共享数据库。
+# 三个子服填写同一个 MySQL 8 数据库后，玩家在任意子服选择的模型和材质都会同步。
+# 只保存玩家状态，不保存模型文件；每个子服仍需放置相同的 models 文件夹。
+# 修改数据库配置后执行 /noir reload；连接切换成功后新请求使用新数据库，不迁移或删除旧数据库数据。
+database:
+  # 是否启用 MySQL 共享存储。关闭时继续使用当前子服本地 player_data 文件。
+  # 可选值：true/false；默认值：false。
+  enabled: false
+  # MySQL 服务器地址。默认值：127.0.0.1。
+  host: "127.0.0.1"
+  # MySQL 端口。取值范围：1-65535；默认值：3306。
+  port: 3306
+  # 数据库名称，需提前创建。默认值：noir。
+  name: "noir"
+  # MySQL 用户名。默认值：noir。
+  username: "noir"
+  # MySQL 密码。请勿提交到公开仓库。默认值为空。
+  password: ""
+  # 数据表名称，只允许字母、数字和下划线。默认值：noir_player_data。
+  table: "noir_player_data"
+  pool:
+    # 连接池最大连接数。取值范围：1-32；默认值：8。
+    maximum-size: 8
+    # 连接池最小空闲连接数。取值范围：0-maximum-size；默认值：1。
+    minimum-idle: 1
+    # 获取连接超时时间，单位毫秒。取值范围：1000-60000；默认值：5000。
+    connection-timeout-ms: 5000
